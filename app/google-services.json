@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "217778215164",
+    "project_id": "bankapp-f0119",
+    "storage_bucket": "bankapp-f0119.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:217778215164:android:c73540899bde7d49439f79",
+        "android_client_info": {
+          "package_name": "uk.ac.tees.mad.F5250116"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0huvpYFRNOZAf8rFTXZLMhBRqRE9A63E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
