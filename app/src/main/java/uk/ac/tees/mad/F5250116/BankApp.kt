@@ -54,6 +54,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,6 +75,7 @@ import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.delay
 import uk.ac.tees.mad.F5250116.data.RecentTransfer
 import java.util.concurrent.Executor
+import kotlinx.coroutines.launch
 
 private object Destinations {
     const val Splash = "splash"
@@ -83,6 +85,11 @@ private object Destinations {
 }
 
 private typealias BiometricEnrollmentAction = (() -> Unit) -> Unit
+
+private data class BiometricAvailability(
+    val isReady: Boolean,
+    val message: String
+)
 
 @Composable
 fun BankAppRoot(viewModel: BankViewModel) {
@@ -256,9 +263,9 @@ private fun AuthScreen(
     var useBiometricForRegistration by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? FragmentActivity
-    val biometricReady = remember {
-        activity != null && BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) ==
-            BiometricManager.BIOMETRIC_SUCCESS
+    val scope = rememberCoroutineScope()
+    val biometricAvailability = remember {
+        biometricAvailability(context, activity != null)
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
@@ -279,7 +286,7 @@ private fun AuthScreen(
             Button(
                 onClick = {
                     onLogin(loginEmail, loginPin, useBiometricForLogin) { afterBiometric ->
-                        if (activity != null && biometricReady) {
+                        if (biometricAvailability.isReady && activity != null) {
                             showBiometricPrompt(
                                 activity = activity,
                                 title = "Link fingerprint to this account",
@@ -287,6 +294,9 @@ private fun AuthScreen(
                                 onSuccess = afterBiometric
                             )
                         } else {
+                            if (useBiometricForLogin) {
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                            }
                             afterBiometric()
                         }
                     }
@@ -296,16 +306,42 @@ private fun AuthScreen(
                 Text("Sign in")
             }
             Spacer(Modifier.height(10.dp))
-            if (biometricReady) {
-                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                    Text("Link fingerprint to this login")
-                    Switch(checked = useBiometricForLogin, onCheckedChange = { useBiometricForLogin = it })
-                }
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Text("Link fingerprint to this login")
+                Switch(
+                    checked = useBiometricForLogin,
+                    onCheckedChange = {
+                        if (it && !biometricAvailability.isReady) {
+                            useBiometricForLogin = false
+                            scope.launch { snackbarHostState.showSnackbar(biometricAvailability.message) }
+                        } else {
+                            useBiometricForLogin = it
+                        }
+                    }
+                )
             }
-            biometricAccountEmail?.let { enrolledEmail ->
-                TextButton(
-                    onClick = {
-                        if (activity != null) {
+            Text(
+                if (biometricAvailability.isReady) {
+                    "Biometric sign in is available on this device."
+                } else {
+                    biometricAvailability.message
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val enrolledEmail = biometricAccountEmail
+            TextButton(
+                onClick = {
+                    when {
+                        !biometricAvailability.isReady -> {
+                            scope.launch { snackbarHostState.showSnackbar(biometricAvailability.message) }
+                        }
+                        enrolledEmail.isNullOrBlank() -> {
+                            scope.launch {
+                                snackbarHostState.showSnackbar("No fingerprint-linked account is saved on this device yet.")
+                            }
+                        }
+                        activity != null -> {
                             showBiometricPrompt(
                                 activity = activity,
                                 title = "Fingerprint sign in",
@@ -313,13 +349,21 @@ private fun AuthScreen(
                                 onSuccess = onBiometricLogin
                             )
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Fingerprint, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Use fingerprint for $enrolledEmail")
-                }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Fingerprint, null)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (enrolledEmail.isNullOrBlank()) {
+                        "Use fingerprint sign in"
+                    } else {
+                        "Use fingerprint for $enrolledEmail"
+                    }
+                )
+            }
+            if (!enrolledEmail.isNullOrBlank()) {
                 TextButton(onClick = onClearBiometric, modifier = Modifier.fillMaxWidth()) {
                     Text("Remove saved fingerprint account")
                 }
@@ -349,14 +393,19 @@ private fun AuthScreen(
                             AppField(lastName, { lastName = it }, "Last name", Icons.Default.Person)
                             PinField(registerPin, { registerPin = it.take(6) }, "6-digit PIN")
                             PinField(confirmPin, { confirmPin = it.take(6) }, "Confirm PIN")
-                            if (biometricReady) {
-                                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                                    Text("Use fingerprint for this new account")
-                                    Switch(
-                                        checked = useBiometricForRegistration,
-                                        onCheckedChange = { useBiometricForRegistration = it }
-                                    )
-                                }
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                                Text("Use fingerprint for this new account")
+                                Switch(
+                                    checked = useBiometricForRegistration,
+                                    onCheckedChange = {
+                                        if (it && !biometricAvailability.isReady) {
+                                            useBiometricForRegistration = false
+                                            scope.launch { snackbarHostState.showSnackbar(biometricAvailability.message) }
+                                        } else {
+                                            useBiometricForRegistration = it
+                                        }
+                                    }
+                                )
                             }
                             Button(
                                 onClick = {
@@ -368,7 +417,7 @@ private fun AuthScreen(
                                         confirmPin,
                                         useBiometricForRegistration
                                     ) { afterBiometric ->
-                                        if (activity != null && biometricReady) {
+                                        if (biometricAvailability.isReady && activity != null) {
                                             showBiometricPrompt(
                                                 activity = activity,
                                                 title = "Link fingerprint to this account",
@@ -384,11 +433,49 @@ private fun AuthScreen(
                             ) {
                                 Text("Register")
                             }
+                            Text(
+                                if (biometricAvailability.isReady) {
+                                    "Fingerprint can be linked during registration on supported devices."
+                                } else {
+                                    biometricAvailability.message
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private fun biometricAvailability(context: android.content.Context, hasActivity: Boolean): BiometricAvailability {
+    if (!hasActivity) {
+        return BiometricAvailability(
+            isReady = false,
+            message = "Biometric authentication is not available on the device you are running."
+        )
+    }
+
+    return when (BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK)) {
+        BiometricManager.BIOMETRIC_SUCCESS -> BiometricAvailability(true, "Biometric sign in is available on this device.")
+        BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricAvailability(
+            false,
+            "Biometric authentication is not available on the device you are running."
+        )
+        BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BiometricAvailability(
+            false,
+            "Biometric hardware is currently unavailable on this device."
+        )
+        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricAvailability(
+            false,
+            "biometrics is not found on this device."
+        )
+        else -> BiometricAvailability(
+            false,
+            "Biometric authentication is not available on the device you are running."
+        )
     }
 }
 
