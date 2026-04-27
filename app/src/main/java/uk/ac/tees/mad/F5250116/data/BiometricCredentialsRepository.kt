@@ -1,6 +1,7 @@
 package uk.ac.tees.mad.F5250116.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 
@@ -11,13 +12,8 @@ data class BiometricCredentials(
 
 class BiometricCredentialsRepository(context: Context) {
 
-    private val sharedPreferences = EncryptedSharedPreferences.create(
-        PREFS_NAME,
-        MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC),
-        context,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private val appContext = context.applicationContext
+    private val sharedPreferences: SharedPreferences by lazy { createEncryptedPreferences() }
 
     fun saveCredentials(email: String, pin: String) {
         sharedPreferences.edit()
@@ -42,6 +38,25 @@ class BiometricCredentialsRepository(context: Context) {
 
     fun clearCredentials() {
         sharedPreferences.edit().clear().apply()
+    }
+
+    private fun createEncryptedPreferences(): SharedPreferences {
+        return runCatching {
+            buildEncryptedPreferences()
+        }.getOrElse {
+            appContext.deleteSharedPreferences(PREFS_NAME)
+            buildEncryptedPreferences()
+        }
+    }
+
+    private fun buildEncryptedPreferences(): SharedPreferences {
+        return EncryptedSharedPreferences.create(
+            PREFS_NAME,
+            MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC),
+            appContext,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
     }
 
     companion object {
