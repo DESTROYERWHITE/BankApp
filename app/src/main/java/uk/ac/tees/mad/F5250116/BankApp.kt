@@ -82,6 +82,8 @@ private object Destinations {
     const val Transfer = "transfer"
 }
 
+private typealias BiometricEnrollmentAction = (() -> Unit) -> Unit
+
 @Composable
 fun BankAppRoot(viewModel: BankViewModel) {
     val navController = rememberNavController()
@@ -107,21 +109,30 @@ fun BankAppRoot(viewModel: BankViewModel) {
 
         composable(Destinations.Auth) {
             AuthScreen(
-                biometricEnabled = uiState.preferences.biometricEnabled,
+                biometricAccountEmail = uiState.biometricAccountEmail,
                 snackbarHostState = snackbarHostState,
-                onLogin = { email, pin ->
+                onLogin = { email, pin, useBiometric, onBiometricEnroll ->
                     viewModel.login(
                         email = email,
                         pin = pin,
                         onSuccess = {
-                            navController.navigate(Destinations.Dashboard) {
-                                popUpTo(Destinations.Auth) { inclusive = true }
+                            if (useBiometric) {
+                                onBiometricEnroll {
+                                    viewModel.enrollBiometricForCurrentCredentials(email, pin)
+                                    navController.navigate(Destinations.Dashboard) {
+                                        popUpTo(Destinations.Auth) { inclusive = true }
+                                    }
+                                }
+                            } else {
+                                navController.navigate(Destinations.Dashboard) {
+                                    popUpTo(Destinations.Auth) { inclusive = true }
+                                }
                             }
                         },
                         onError = { snackbarMessage = it }
                     )
                 },
-                onRegister = { email, firstName, lastName, pin, confirmPin ->
+                onRegister = { email, firstName, lastName, pin, confirmPin, useBiometric, onBiometricEnroll ->
                     viewModel.register(
                         email = email,
                         firstName = firstName,
@@ -129,8 +140,17 @@ fun BankAppRoot(viewModel: BankViewModel) {
                         pin = pin,
                         confirmPin = confirmPin,
                         onSuccess = {
-                            navController.navigate(Destinations.Dashboard) {
-                                popUpTo(Destinations.Auth) { inclusive = true }
+                            if (useBiometric) {
+                                onBiometricEnroll {
+                                    viewModel.enrollBiometricForCurrentCredentials(email, pin)
+                                    navController.navigate(Destinations.Dashboard) {
+                                        popUpTo(Destinations.Auth) { inclusive = true }
+                                    }
+                                }
+                            } else {
+                                navController.navigate(Destinations.Dashboard) {
+                                    popUpTo(Destinations.Auth) { inclusive = true }
+                                }
                             }
                         },
                         onError = { snackbarMessage = it }
@@ -146,7 +166,10 @@ fun BankAppRoot(viewModel: BankViewModel) {
                         onError = { snackbarMessage = it }
                     )
                 },
-                onToggleBiometric = viewModel::toggleBiometrics
+                onClearBiometric = {
+                    viewModel.clearBiometricEnrollment()
+                    snackbarMessage = "Fingerprint login removed from this device."
+                }
             )
         }
 
@@ -215,21 +238,23 @@ private fun SplashScreen(userName: String, isAuthLoading: Boolean, onFinished: (
 
 @Composable
 private fun AuthScreen(
-    biometricEnabled: Boolean,
+    biometricAccountEmail: String?,
     snackbarHostState: SnackbarHostState,
-    onLogin: (String, String) -> Unit,
-    onRegister: (String, String, String, String, String) -> Unit,
+    onLogin: (String, String, Boolean, BiometricEnrollmentAction) -> Unit,
+    onRegister: (String, String, String, String, String, Boolean, BiometricEnrollmentAction) -> Unit,
     onBiometricLogin: () -> Unit,
-    onToggleBiometric: (Boolean) -> Unit
+    onClearBiometric: () -> Unit
 ) {
     var loginEmail by rememberSaveable { mutableStateOf("") }
     var loginPin by rememberSaveable { mutableStateOf("") }
+    var useBiometricForLogin by rememberSaveable { mutableStateOf(false) }
     var registerExpanded by rememberSaveable { mutableStateOf(false) }
     var registerEmail by rememberSaveable { mutableStateOf("") }
     var firstName by rememberSaveable { mutableStateOf("") }
     var lastName by rememberSaveable { mutableStateOf("") }
     var registerPin by rememberSaveable { mutableStateOf("") }
     var confirmPin by rememberSaveable { mutableStateOf("") }
+    var useBiometricForRegistration by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val biometricReady = remember {
@@ -252,22 +277,52 @@ private fun AuthScreen(
             Spacer(Modifier.height(16.dp))
             PinField(loginPin, { loginPin = it.take(6) }, "PIN")
             Spacer(Modifier.height(20.dp))
-            Button(onClick = { onLogin(loginEmail, loginPin) }, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = {
+                    onLogin(loginEmail, loginPin, useBiometricForLogin) { afterBiometric ->
+                        if (activity != null && biometricReady) {
+                            showBiometricPrompt(
+                                activity = activity,
+                                title = "Link fingerprint to this account",
+                                subtitle = "Use your fingerprint to save $loginEmail for biometric sign in",
+                                onSuccess = afterBiometric
+                            )
+                        } else {
+                            afterBiometric()
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text("Sign in")
             }
             Spacer(Modifier.height(10.dp))
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                Text("Enable biometric login")
-                Switch(checked = biometricEnabled, onCheckedChange = onToggleBiometric)
+            if (biometricReady) {
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                    Text("Link fingerprint to this login")
+                    Switch(checked = useBiometricForLogin, onCheckedChange = { useBiometricForLogin = it })
+                }
             }
-            if (biometricEnabled && biometricReady) {
+            biometricAccountEmail?.let { enrolledEmail ->
                 TextButton(
-                    onClick = { if (activity != null) showBiometricPrompt(activity, onBiometricLogin) },
+                    onClick = {
+                        if (activity != null) {
+                            showBiometricPrompt(
+                                activity = activity,
+                                title = "Fingerprint sign in",
+                                subtitle = "Sign in as $enrolledEmail",
+                                onSuccess = onBiometricLogin
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Fingerprint, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Use fingerprint")
+                    Text("Use fingerprint for $enrolledEmail")
+                }
+                TextButton(onClick = onClearBiometric, modifier = Modifier.fillMaxWidth()) {
+                    Text("Remove saved fingerprint account")
                 }
             }
 
@@ -295,8 +350,37 @@ private fun AuthScreen(
                             AppField(lastName, { lastName = it }, "Last name", Icons.Default.Person)
                             PinField(registerPin, { registerPin = it.take(6) }, "6-digit PIN")
                             PinField(confirmPin, { confirmPin = it.take(6) }, "Confirm PIN")
+                            if (biometricReady) {
+                                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                                    Text("Use fingerprint for this new account")
+                                    Switch(
+                                        checked = useBiometricForRegistration,
+                                        onCheckedChange = { useBiometricForRegistration = it }
+                                    )
+                                }
+                            }
                             Button(
-                                onClick = { onRegister(registerEmail, firstName, lastName, registerPin, confirmPin) },
+                                onClick = {
+                                    onRegister(
+                                        registerEmail,
+                                        firstName,
+                                        lastName,
+                                        registerPin,
+                                        confirmPin,
+                                        useBiometricForRegistration
+                                    ) { afterBiometric ->
+                                        if (activity != null && biometricReady) {
+                                            showBiometricPrompt(
+                                                activity = activity,
+                                                title = "Link fingerprint to this account",
+                                                subtitle = "Use your fingerprint to save $registerEmail for biometric sign in",
+                                                onSuccess = afterBiometric
+                                            )
+                                        } else {
+                                            afterBiometric()
+                                        }
+                                    }
+                                },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text("Register")
@@ -619,7 +703,12 @@ private fun SummaryRow(label: String, value: String) {
     Spacer(Modifier.height(10.dp))
 }
 
-private fun showBiometricPrompt(activity: FragmentActivity, onSuccess: () -> Unit) {
+private fun showBiometricPrompt(
+    activity: FragmentActivity,
+    title: String,
+    subtitle: String,
+    onSuccess: () -> Unit
+) {
     val prompt = BiometricPrompt(
         activity,
         activity.mainExecutor as Executor,
@@ -631,8 +720,8 @@ private fun showBiometricPrompt(activity: FragmentActivity, onSuccess: () -> Uni
     )
 
     val promptInfo = BiometricPrompt.PromptInfo.Builder()
-        .setTitle("Biometric sign in")
-        .setSubtitle("Use fingerprint or face unlock to access Campus Bank")
+        .setTitle(title)
+        .setSubtitle(subtitle)
         .setNegativeButtonText("Cancel")
         .build()
 

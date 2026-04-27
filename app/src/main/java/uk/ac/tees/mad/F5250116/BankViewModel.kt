@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import uk.ac.tees.mad.F5250116.data.BankPreferences
 import uk.ac.tees.mad.F5250116.data.BankPreferencesRepository
+import uk.ac.tees.mad.F5250116.data.BiometricCredentialsRepository
 import uk.ac.tees.mad.F5250116.data.ExchangeRateApi
 import uk.ac.tees.mad.F5250116.data.FirebaseAuthRepository
 import uk.ac.tees.mad.F5250116.data.FirebaseUserProfile
@@ -38,19 +39,22 @@ data class BankUiState(
     val preferences: BankPreferences = BankPreferences(),
     val isLoggedIn: Boolean = false,
     val isAuthLoading: Boolean = true,
-    val exchangeRates: ExchangeRateState = ExchangeRateState()
+    val exchangeRates: ExchangeRateState = ExchangeRateState(),
+    val biometricAccountEmail: String? = null
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class BankViewModel(
     private val preferencesRepository: BankPreferencesRepository,
-    private val firebaseAuthRepository: FirebaseAuthRepository
+    private val firebaseAuthRepository: FirebaseAuthRepository,
+    private val biometricCredentialsRepository: BiometricCredentialsRepository
 ) : ViewModel() {
 
     private val isLoggedIn = MutableStateFlow(false)
     private val isAuthLoading = MutableStateFlow(true)
     private val exchangeState = MutableStateFlow(ExchangeRateState())
     private val activeUserId = MutableStateFlow<String?>(null)
+    private val biometricAccountEmail = MutableStateFlow(biometricCredentialsRepository.enrolledEmail())
 
     private val preferencesFlow = activeUserId.flatMapLatest { userId ->
         preferencesRepository.preferences(userId)
@@ -60,8 +64,9 @@ class BankViewModel(
         preferencesFlow,
         isLoggedIn,
         isAuthLoading,
-        exchangeState
-    ) { preferences, loggedIn, authLoading, exchange ->
+        exchangeState,
+        biometricAccountEmail
+    ) { preferences, loggedIn, authLoading, exchange, enrolledEmail ->
         BankUiState(
             preferences = preferences,
             isLoggedIn = loggedIn,
@@ -70,12 +75,13 @@ class BankViewModel(
                 lastUpdated = if (exchange.lastUpdated == "No live data yet") preferences.lastRateDate else exchange.lastUpdated,
                 usdRate = exchange.usdRate ?: preferences.usdRate,
                 eurRate = exchange.eurRate ?: preferences.eurRate
-            )
+            ),
+            biometricAccountEmail = enrolledEmail
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = BankUiState()
+        initialValue = BankUiState(biometricAccountEmail = biometricCredentialsRepository.enrolledEmail())
     )
 
     init {
@@ -83,39 +89,7 @@ class BankViewModel(
     }
 
     fun login(email: String, pin: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        when {
-            email.isBlank() -> {
-                onError("Enter your email address.")
-                return
-            }
-            !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
-                onError("Enter a valid email address.")
-                return
-            }
-            !isValidPin(pin) -> {
-                onError("Use your 6-digit PIN to sign in.")
-                return
-            }
-        }
-
-        isAuthLoading.value = true
-        firebaseAuthRepository.signIn(
-            email = email.trim(),
-            pin = pin,
-            onSuccess = { profile ->
-                viewModelScope.launch {
-                    syncProfile(profile)
-                    activeUserId.value = profile.uid
-                    isLoggedIn.value = true
-                    isAuthLoading.value = false
-                    onSuccess()
-                }
-            },
-            onError = { message ->
-                isAuthLoading.value = false
-                onError(message)
-            }
-        )
+        authenticate(email, pin, onSuccess, onError)
     }
 
     fun register(
@@ -160,20 +134,28 @@ class BankViewModel(
     }
 
     fun loginWithBiometrics(onSuccess: () -> Unit, onError: (String) -> Unit) {
-        if (!firebaseAuthRepository.hasAuthenticatedSession()) {
-            onError("Register or sign in once before using biometric login.")
+        val credentials = biometricCredentialsRepository.getCredentials()
+        if (credentials == null) {
+            onError("No fingerprint-linked account is saved on this device yet.")
             return
         }
 
-        val currentUserId = firebaseAuthRepository.currentUserId()
-        if (currentUserId == null) {
-            onError("No Firebase user session found for biometric login.")
-            return
-        }
+        authenticate(
+            email = credentials.email,
+            pin = credentials.pin,
+            onSuccess = onSuccess,
+            onError = onError
+        )
+    }
 
-        activeUserId.value = currentUserId
-        isLoggedIn.value = true
-        onSuccess()
+    fun enrollBiometricForCurrentCredentials(email: String, pin: String) {
+        biometricCredentialsRepository.saveCredentials(email.trim(), pin)
+        biometricAccountEmail.value = email.trim()
+    }
+
+    fun clearBiometricEnrollment() {
+        biometricCredentialsRepository.clearCredentials()
+        biometricAccountEmail.value = null
     }
 
     fun logout() {
@@ -181,13 +163,6 @@ class BankViewModel(
         activeUserId.value = null
         isLoggedIn.value = false
         exchangeState.value = ExchangeRateState()
-    }
-
-    fun toggleBiometrics(enabled: Boolean) {
-        val userId = activeUserId.value ?: return
-        viewModelScope.launch {
-            preferencesRepository.setBiometricEnabled(userId, enabled)
-        }
     }
 
     fun refreshRates() {
@@ -255,6 +230,47 @@ class BankViewModel(
         return NumberFormat.getCurrencyInstance(Locale.UK).format(value)
     }
 
+    private fun authenticate(
+        email: String,
+        pin: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        when {
+            email.isBlank() -> {
+                onError("Enter your email address.")
+                return
+            }
+            !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+                onError("Enter a valid email address.")
+                return
+            }
+            !isValidPin(pin) -> {
+                onError("Use your 6-digit PIN to sign in.")
+                return
+            }
+        }
+
+        isAuthLoading.value = true
+        firebaseAuthRepository.signIn(
+            email = email.trim(),
+            pin = pin,
+            onSuccess = { profile ->
+                viewModelScope.launch {
+                    syncProfile(profile)
+                    activeUserId.value = profile.uid
+                    isLoggedIn.value = true
+                    isAuthLoading.value = false
+                    onSuccess()
+                }
+            },
+            onError = { message ->
+                isAuthLoading.value = false
+                onError(message)
+            }
+        )
+    }
+
     private fun restoreSession() {
         if (!firebaseAuthRepository.hasAuthenticatedSession()) {
             isAuthLoading.value = false
@@ -293,11 +309,16 @@ class BankViewModel(
 
     class Factory(
         private val preferencesRepository: BankPreferencesRepository,
-        private val firebaseAuthRepository: FirebaseAuthRepository
+        private val firebaseAuthRepository: FirebaseAuthRepository,
+        private val biometricCredentialsRepository: BiometricCredentialsRepository
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return BankViewModel(preferencesRepository, firebaseAuthRepository) as T
+            return BankViewModel(
+                preferencesRepository = preferencesRepository,
+                firebaseAuthRepository = firebaseAuthRepository,
+                biometricCredentialsRepository = biometricCredentialsRepository
+            ) as T
         }
     }
 }
