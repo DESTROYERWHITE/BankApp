@@ -264,7 +264,7 @@ private fun AuthScreen(
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
-    val biometricAvailability = remember {
+    val biometricAvailability = remember(context, activity) {
         biometricAvailability(context, activity != null)
     }
 
@@ -458,21 +458,30 @@ private fun biometricAvailability(context: android.content.Context, hasActivity:
         )
     }
 
-    return when (BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK)) {
-        BiometricManager.BIOMETRIC_SUCCESS -> BiometricAvailability(true, "Biometric sign in is available on this device.")
-        BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricAvailability(
-            false,
-            "Biometric authentication is not available on the device you are running."
-        )
-        BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BiometricAvailability(
-            false,
-            "Biometric hardware is currently unavailable on this device."
-        )
-        BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricAvailability(
-            false,
-            "biometrics is not found on this device."
-        )
-        else -> BiometricAvailability(
+    return runCatching {
+        BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+    }.map { result ->
+        when (result) {
+            BiometricManager.BIOMETRIC_SUCCESS -> BiometricAvailability(true, "Biometric sign in is available on this device.")
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricAvailability(
+                false,
+                "Biometric authentication is not available on the device you are running."
+            )
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BiometricAvailability(
+                false,
+                "Biometric hardware is currently unavailable on this device."
+            )
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricAvailability(
+                false,
+                "Biometric is supported here, but no fingerprint is enrolled on this device."
+            )
+            else -> BiometricAvailability(
+                false,
+                "Biometric authentication is not available on the device you are running."
+            )
+        }
+    }.getOrElse {
+        BiometricAvailability(
             false,
             "Biometric authentication is not available on the device you are running."
         )
