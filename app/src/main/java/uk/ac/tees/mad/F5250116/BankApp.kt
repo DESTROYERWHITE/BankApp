@@ -192,7 +192,6 @@ fun BankAppRoot(viewModel: BankViewModel) {
             TransferScreen(
                 balance = viewModel.formatCurrency(uiState.preferences.balance),
                 formatCurrency = viewModel::formatCurrency,
-                recentTransfers = uiState.preferences.recentTransfers,
                 onBack = { navController.popBackStack() },
                 onSubmit = { payee, amount, reference, onSuccess ->
                     viewModel.submitTransfer(
@@ -490,7 +489,6 @@ private fun DashboardScreen(
 private fun TransferScreen(
     balance: String,
     formatCurrency: (Double) -> String,
-    recentTransfers: List<RecentTransfer>,
     onBack: () -> Unit,
     onSubmit: (String, String, String, (TransferReceipt) -> Unit) -> Unit,
     snackbarHostState: SnackbarHostState
@@ -498,7 +496,8 @@ private fun TransferScreen(
     var payee by rememberSaveable { mutableStateOf("") }
     var amount by rememberSaveable { mutableStateOf("") }
     var reference by rememberSaveable { mutableStateOf("") }
-    var localReceiptHistory by remember(recentTransfers) { mutableStateOf(recentTransfers.take(5)) }
+    var successPayee by rememberSaveable { mutableStateOf("") }
+    val hasSuccessMessage = successPayee.isNotBlank()
 
     Scaffold(
         topBar = { SimpleTopBar("Transfer", onBack) },
@@ -519,15 +518,7 @@ private fun TransferScreen(
             Button(
                 onClick = {
                     onSubmit(payee, amount, reference) {
-                        localReceiptHistory = (listOf(
-                            RecentTransfer(
-                                payee = it.payee,
-                                amount = it.amount,
-                                reference = it.reference
-                            )
-                        ) + localReceiptHistory).distinctBy { receipt ->
-                            "${receipt.payee}|${receipt.amount}|${receipt.reference}"
-                        }.take(5)
+                        successPayee = it.payee
                         payee = ""
                         amount = ""
                         reference = ""
@@ -538,11 +529,8 @@ private fun TransferScreen(
                 Text("Complete transfer")
             }
 
-            if (localReceiptHistory.isNotEmpty()) {
-                ReceiptHistoryCard(
-                    receipts = localReceiptHistory,
-                    formatCurrency = formatCurrency
-                )
+            if (hasSuccessMessage) {
+                SuccessMessageCard(payee = successPayee)
             }
         }
     }
@@ -588,10 +576,7 @@ private fun RecentTransfersCard(
 }
 
 @Composable
-private fun ReceiptHistoryCard(
-    receipts: List<RecentTransfer>,
-    formatCurrency: (Double) -> String
-) {
+private fun SuccessMessageCard(payee: String) {
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
@@ -602,18 +587,11 @@ private fun ReceiptHistoryCard(
                 Spacer(Modifier.width(8.dp))
                 Text("Transfer complete", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(16.dp))
-            Text("Recent receipts", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(12.dp))
-            receipts.take(5).forEachIndexed { index, receipt ->
-                TransferSummaryItem(
-                    transfer = receipt,
-                    formatCurrency = formatCurrency
-                )
-                if (index < receipts.take(5).lastIndex) {
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                }
-            }
+            Text(
+                text = "Transfer successful to $payee",
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
         }
     }
 }
