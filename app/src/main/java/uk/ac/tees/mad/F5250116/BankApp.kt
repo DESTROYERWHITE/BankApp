@@ -229,7 +229,7 @@ private fun SplashScreen(userName: String, isAuthLoading: Boolean, onFinished: (
         ) {
             Icon(Icons.Default.AccountBalance, null, tint = Color.White, modifier = Modifier.height(64.dp))
             Text("Campus Bank", style = MaterialTheme.typography.headlineLarge, color = Color.White, fontWeight = FontWeight.Bold)
-            Text("Secure student banking for $userName", color = Color(0xFFDCEFE8))
+            Text("By F5250116 Richard Oludare", color = Color(0xFFDCEFE8))
             if (isAuthLoading) CircularProgressIndicator(color = Color.White)
         }
     }

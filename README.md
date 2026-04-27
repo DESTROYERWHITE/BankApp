@@ -263,3 +263,105 @@ The GitHub repository now includes sprint milestones and sprint issues for:
 - Sprint 5
 
 These can be used as agile evidence alongside the sprint plan and sprint review documents.
+
+## Permissions Used
+
+The app requests only the permissions needed for its implemented features:
+
+- `android.permission.INTERNET`
+  - Used for Firebase Authentication, Cloud Firestore communication, and the exchange-rate web service.
+  - Code reference: `app/src/main/AndroidManifest.xml:5`
+
+- `android.permission.USE_BIOMETRIC`
+  - Used so the app can offer fingerprint or biometric sign-in on supported devices.
+  - Code references:
+    - `app/src/main/AndroidManifest.xml:6`
+    - `app/src/main/java/uk/ac/tees/mad/F5250116/BankApp.kt:653`
+
+## Data Stored On The Device
+
+The app stores some data locally on the user’s device to support persistence and user experience.
+
+### DataStore local storage
+
+Stored using DataStore and scoped per Firebase user ID:
+
+- first name
+- last name
+- full display name
+- email address
+- generated masked account number
+- account balance
+- most recent transfer details
+- recent transfers list, up to 5 items
+- cached exchange rate values and last update date
+
+Main code references:
+
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BankPreferencesRepository.kt:27`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BankPreferencesRepository.kt:51`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BankPreferencesRepository.kt:96`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BankPreferencesRepository.kt:111`
+
+### Encrypted biometric credential storage
+
+Stored using `EncryptedSharedPreferences`:
+
+- biometric-linked email address
+- biometric-linked 6-digit PIN
+
+This data is stored only when the user chooses to link fingerprint sign-in to a specific account.
+
+Main code references:
+
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BiometricCredentialsRepository.kt:14`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BiometricCredentialsRepository.kt:22`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/BiometricCredentialsRepository.kt:29`
+
+## Third-Party Services Communicating With The App
+
+The app communicates with two external services:
+
+### 1. Firebase
+
+Firebase is used as the main backend platform.
+
+It handles:
+
+- account registration
+- account login
+- session restoration
+- Firestore user profile storage
+
+Main code references:
+
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/FirebaseAuthRepository.kt:14`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/FirebaseAuthRepository.kt:23`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/FirebaseAuthRepository.kt:82`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/FirebaseAuthRepository.kt:108`
+
+### 2. Frankfurter Exchange Rate API
+
+This is the third-party web service used to retrieve live exchange rates over HTTPS.
+
+It is used for:
+
+- GBP to USD conversion rate
+- GBP to EUR conversion rate
+- refreshing currency data shown on the dashboard
+
+Main code references:
+
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/ExchangeRateService.kt:15`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/data/ExchangeRateService.kt:26`
+- `app/src/main/java/uk/ac/tees/mad/F5250116/BankViewModel.kt:201`
+
+## How To Explain This In Your Presentation
+
+You can describe it like this:
+
+- “The app stores low-risk banking prototype data locally using DataStore, including balance, recent transfers, and cached exchange rates.”
+- “Biometric-linked login details are stored securely using encrypted shared preferences only when the user explicitly enables fingerprint login.”
+- “Firebase is used as the backend service for authentication and user profile storage.”
+- “A third-party HTTPS web service, the Frankfurter exchange-rate API, is used to retrieve live currency conversion data.”
+- “The app only requests the permissions it needs, namely Internet access and biometric authentication support.”
